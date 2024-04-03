@@ -1,0 +1,7 @@
+---
+- name: This play gathers no facts automatically
+	hosts: webservers
+	gather_facts: no    # 팩트 수집 중지
+	tasks:
+  - name: Manually gather facts
+		setup:             # 수동으로 수집

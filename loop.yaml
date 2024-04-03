@@ -1,0 +1,10 @@
+---
+- hosts: all
+  tasks:
+    - name: Postfix and Dovecot are running
+      yum:
+        name: "{{ item }}"
+        state: installed
+      loop:
+        - postfix
+        - dovecot
