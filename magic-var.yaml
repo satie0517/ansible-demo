@@ -1,7 +1,0 @@
----
-- hosts: seoul
-  become: tue
-  tasks:
-    -name: Show ansible_facts
-     debug:
-       var: hostvars['servera.example.com']['ansible_all_ipv4_address']

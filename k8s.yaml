@@ -1,0 +1,128 @@
+- name: Configure servers
+  hosts: cluster
+  tasks:
+#1. selinux permissive 설정
+    - name: 1 Set SELinux to permissive mode
+      selinux:
+        policy: targeted
+        state: permissive
+
+    - name: 1-1 Stop firewalld
+      service:
+        name: firewalld
+        state: stopped
+        enabled: false
+
+#2. swap을 off 설정 - disable
+    - name: 2 Swap off on runtime
+      command:
+        cmd: swapoff -a
+      when: ansible_swaptotal_mb > 0
+
+    - name: 2-2  Swap off on fstab
+      mount:
+        name: none
+        fstype: swap
+        state: absent
+
+#3. 커널 모듈 설정
+    - name: 3 Load kernel modules
+      modprobe:
+        name: "{{ item }}"
+        state: present
+      loop:
+        - overlay
+        - br_netfilter
+
+    - name: 3 Set kernel parameters
+      sysctl:
+        name: "{{ item.key }}"
+        value: "{{ item.value }}"
+        state: present
+      loop:
+        - { key: "net.bridge.bridge-nf-call-ip6tables", value: "1" }
+        - { key: "net.bridge.bridge-nf-call-iptables", value: "1" }
+        - { key: "net.ipv4.ip_forward", value: "1" }
+
+#4. Container Runtime + Kubeadm 설치
+
+ #4-1. Repository 구성 (docker , kubernetes)
+    - name: 4 Install Docker repository file
+      get_url:
+        url: https://download.docker.com/linux/centos/docker-ce.repo
+        dest: /etc/yum.repos.d/docker-ce.repo
+
+    - name: 4 Configure Kubernetes repository
+      yum_repository:
+        name: kubernetes
+        description: Kubernetes
+        baseurl: https://pkgs.k8s.io/core:/stable:/v1.29/rpm/
+        gpgcheck: yes
+        gpgkey: https://pkgs.k8s.io/core:/stable:/v1.29/rpm/repodata/repomd.xml.key
+        enabled: yes
+
+ #4-2. 패키지 설치 (containerd, kubeadm)
+    - name: 4 Install containerd
+      package:
+        name: containerd
+        state: present
+
+    - name: 4 Install kubeadm
+      package:
+        name: kubeadm
+        state: present
+
+    - name: 4 Install kubectl
+      package:
+        name: kubectl
+        state: present
+
+    - name: 4 Install kubelet
+      package:
+        name: kubelet
+        state: present
+
+#5. containerd configuration 설정
+    - name: 5 Transfer containerd config file
+      copy:
+        src: config.toml
+        dest: /etc/containerd/config.toml
+
+#6. kubelet , containerd 데몬 활성화
+    - name: 6 Start kubelet service
+      service:
+        name: kubelet
+        state: started
+        enabled: true
+      become: true
+
+    - name: 6 Start containerd service
+      service:
+        name: containerd
+        state: started
+        enabled: true
+      become: true
+
+#7. DNS 구성 - dnsmasq 설치 및 resolv.conf 파일 설정
+ #7-1. controlplane에만 dnsmasq 설치 및 /etc/hosts 파일 복사
+#    - name: 7 copy /etc/hosts
+#      copy:
+#        src: /etc/hosts
+#        dest: /etc/hosts
+
+#8.init and join
+    - name: 8 init cluster
+      shell: |
+        kubeadm init --apiserver-advertise-address=172.16.0.101 \
+                     --pod-network-cidr=192.168.0.0/16 \
+                     --token=kdigit.1234567890hellow
+        when: inventory_hostname in groups['controlplanes']
+#        ignore_errors: yes
+
+    - name: 8 join cluster
+      shell: |
+        kubeadm join --token=kdigit.1234567890hellow \
+                     --discovery-token-unsafe-skip-ca-verification \
+                     172.168.0.101:6443
+        when: inventory_hostname in groups['worker_nodes']
+
